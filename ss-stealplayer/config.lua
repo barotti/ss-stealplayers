@@ -23,6 +23,26 @@ Config.SearchDuration = 3000
 Config.SearchCooldown = 10000
 
 -- ┌─────────────────────────────────────────┐
+-- │        STATI WASABI_AMBULANCE           │
+-- └─────────────────────────────────────────┘
+
+-- Abilita la perquisizione di giocatori a terra/morti (wasabi_ambulance)
+Config.AllowDeadSearch = true
+
+-- Se true, serve un'arma anche per perquisire un giocatore a terra o morto
+-- Se false, basta avvicinarti
+Config.RequireWeaponForDead = false
+
+-- Fase 1: giocatore in laststand (bleeding out, countdown attivo, striscia)
+-- wasabi setta: state.laststand = true | 'laststand'
+Config.DownedStateBag = "laststand"
+
+-- Fase 2: giocatore completamente morto (countdown finito)
+-- wasabi setta: state.dead = true | 'dead'  OPPURE  state.isDead = true | 'dead'
+-- entrambi vengono controllati automaticamente, non cambiare questo valore
+Config.DeadStateBag = "dead"
+
+-- ┌─────────────────────────────────────────┐
 -- │        ANIMAZIONI MANI ALZATE           │
 -- └─────────────────────────────────────────┘
 -- Lista di animazioni considerate "mani alzate"

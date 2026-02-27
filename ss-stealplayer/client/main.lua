@@ -19,6 +19,7 @@ end
 -- ─────────────────────────────────────────────────────────────
 
 --- Controlla se il ped target sta facendo un'animazione "mani alzate"
+--- (unico check che ha senso fare client-side: l'animazione è visibile localmente)
 local function IsHandsUp(ped)
     Debug(("IsHandsUp check su ped: %d"):format(ped))
     for _, v in ipairs(Config.HandsUpAnims) do
@@ -48,7 +49,7 @@ local function IsOnCooldown(targetId)
     if not limit then return false end
     local remaining = limit - GetGameTimer()
     if remaining > 0 then
-        Debug(("Cooldown attivo per target %d: %.1f secondi rimanenti"):format(targetId, remaining / 1000))
+        Debug(("Cooldown attivo per target %d: %.1f s rimanenti"):format(targetId, remaining / 1000))
         return true
     end
     return false
@@ -87,12 +88,11 @@ local function OnSearchPlayer(data)
         return
     end
 
-    -- Ricava server id dal ped del giocatore target
-    local netId         = NetworkGetNetworkIdFromEntity(entity)
-    local playerIndex   = NetworkGetPlayerIndexFromPed(entity)
+    local playerIndex    = NetworkGetPlayerIndexFromPed(entity)
     local targetServerId = GetPlayerServerId(playerIndex)
+    local netId          = NetworkGetNetworkIdFromEntity(entity)
 
-    Debug(("=== INIZIO PERQUISIZIONE ==="))
+    Debug("=== INIZIO PERQUISIZIONE ===")
     Debug(("  Mio source    : %d"):format(cache.serverId))
     Debug(("  Target entity : %d"):format(entity))
     Debug(("  Target netId  : %d"):format(netId))
@@ -110,34 +110,53 @@ local function OnSearchPlayer(data)
         return
     end
 
-    -- Check arma
-    if not HasWeapon() then
+    -- ── Check mani alzate (client-side: animazione visibile localmente) ──
+    local targetHandsUp = IsHandsUp(entity)
+    Debug(("targetHandsUp = %s"):format(tostring(targetHandsUp)))
+
+    -- ── Se NON ha le mani alzate, chiedi al server se è incapacitato ─────
+    -- I state bag di wasabi NON sono replicati agli altri client,
+    -- quindi il check dead/downed va fatto server-side via callback.
+    local targetIncap  = false
+    local incapReason  = nil
+
+    if not targetHandsUp and Config.AllowDeadSearch then
+        Debug(("Mani alzate false, chiedo al server se target %d è incapacitato (callback)"):format(targetServerId))
+        targetIncap, incapReason = lib.callback.await('ss-stealplayer:isIncapacitated', false, targetServerId)
+        Debug(("Risposta server -> incap=%s reason=%s"):format(tostring(targetIncap), tostring(incapReason)))
+    end
+
+    Debug(("Stato target -> handsUp=%s | incap=%s | incapReason=%s"):format(
+        tostring(targetHandsUp), tostring(targetIncap), tostring(incapReason)
+    ))
+
+    -- ── Check arma ────────────────────────────────────────────────────────
+    local needWeapon = (not targetIncap) or Config.RequireWeaponForDead
+    if needWeapon and not HasWeapon() then
         Debug("Nessuna arma equipaggiata: perquisizione bloccata")
         lib.notify({ title = "Nessuna arma", description = "Devi avere un'arma in mano per perquisire", type = "error" })
         return
     end
 
-    -- Check mani alzate del target
-    if not IsHandsUp(entity) then
-        Debug("Target senza mani alzate: perquisizione bloccata")
-        lib.notify({ title = "Mani alzate", description = "Il giocatore deve avere le mani alzate", type = "error" })
+    -- ── Almeno una condizione deve essere vera ────────────────────────────
+    if not targetHandsUp and not targetIncap then
+        Debug("Nessuna condizione soddisfatta: perquisizione bloccata")
+        lib.notify({ title = "Impossibile perquisire", description = "Il giocatore deve avere le mani alzate o essere a terra", type = "error" })
         return
     end
 
-    -- Tutto ok: avvia la perquisizione
-    isSearching = true
-    Debug("Tutti i check superati, avvio animazione e richiesta server")
+    -- ── Tutto ok: animazione + richiesta server ───────────────────────────
+    local reason = targetHandsUp and "handsup" or incapReason
+    isSearching  = true
+    Debug(("Tutti i check superati [motivo: %s], avvio animazione"):format(reason))
 
-    -- Animazione
     PlaySearchAnim()
 
-    -- Applica cooldown
     searchCooldowns[targetServerId] = GetGameTimer() + Config.SearchCooldown
     Debug(("Cooldown impostato per target %d: %d ms"):format(targetServerId, Config.SearchCooldown))
 
-    -- Richiedi apertura inventario al server
-    Debug(("TriggerServerEvent 'ss-stealplayer:server:openInventory' -> target %d"):format(targetServerId))
-    TriggerServerEvent("ss-stealplayer:server:openInventory", targetServerId)
+    Debug(("TriggerServerEvent -> target=%d reason=%s"):format(targetServerId, reason))
+    TriggerServerEvent("ss-stealplayer:server:openInventory", targetServerId, reason)
 
     isSearching = false
     Debug("=== FINE PERQUISIZIONE ===")
